@@ -1,8 +1,10 @@
+import csv
 import torch
 import torch.nn as nn
 from PIL import Image
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
+from sklearn.metrics import accuracy_score, f1_score
 import random
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -175,3 +177,79 @@ class ResNet18(nn.Module):
 
         correct_class_log_probs = log_probs.gather(1, y_true.unsqueeze(1)).squeeze(1)
         return -correct_class_log_probs.mean()
+
+def evaluate(model, loader, device):
+    model.eval()
+    all_preds = []
+    all_labels = []
+
+    with torch.no_grad():
+        for image, label in loader:
+            image = image.to(device)
+            label = label.to(device)
+
+            outputs = model(image)
+            _, predicted = torch.max(outputs, 1)
+
+            all_preds.extend(predicted.cpu().tolist())
+            all_labels.extend(label.cpu().tolist())
+
+    model.train()
+
+    accuracy = accuracy_score(all_labels, all_preds)
+    macro_f1 = f1_score(all_labels, all_preds, average="macro")
+    return accuracy, macro_f1, all_preds
+
+
+model = ResNet18()
+model = model.to(device)
+optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum= MOMENTUM, weight_decay= WEIGHT_DECAY)
+
+# TRAINING LOOP WITH EARLY STOPPING BASED ON VALIDATION ACCRURACY
+best_val_acc = 0.0
+epochs_without_improvement = 0
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=LEARNING_RATE_SHRINK_FACTOR, patience=LEARNING_RATE_PATIENCE) # ADAPTIVE LEARNING RATE DECAY
+
+for epoch in range(MAX_EPOCHS):
+    for image, label in tr_loader:
+        image = image.to(device)
+        label = label.to(device)
+        outputs = model(image)
+        loss = model.loss(outputs, label)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    val_acc, val_f1, _ = evaluate(model, val_loader, device)
+    print(f"Epoch: {epoch}, Loss: {loss.item():.4f}, Val Accuracy: {val_acc*100:.2f}%, Val Macro-F1: {val_f1:.4f}")
+
+    scheduler.step(val_acc)
+
+    # EARLY STOPPING
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        epochs_without_improvement = 0
+        torch.save(model.state_dict(), "best_model.pt")
+    else:
+        epochs_without_improvement+=1
+        if epochs_without_improvement >= EARLY_STOPPING_PATIENCE:
+            print(f"Early stopping at epoch {epoch} — no val improvement for {EARLY_STOPPING_PATIENCE} epochs.")
+            break
+
+model.load_state_dict(torch.load("best_model.pt"))
+
+# FINAL NUMBERS ON TRAINING AND TEST SET AND SAVING OUTPUT TO CSV.
+train_acc, train_f1, _ = evaluate(model, tr_deter_loader, device)
+print(f"Train Accuracy: {train_acc*100:.2f}%, Train Macro-F1: {train_f1:.4f}")
+
+test_acc, test_f1, test_preds = evaluate(model, te_loader, device)
+print(f"Test Accuracy: {test_acc*100:.2f}%, Test Macro-F1: {test_f1:.4f}")
+
+with open("food-101/meta/classes.txt", "r") as f:
+    food_classes = [line.strip() for line in f.readlines()]
+
+with open("testOutput.csv", "w", newline="") as f:
+    writer = csv.writer(f)
+    for pred in test_preds:
+        writer.writerow([food_classes[pred]])
