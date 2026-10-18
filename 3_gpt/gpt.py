@@ -9,9 +9,9 @@ max_iters = 5000
 eval_iters = 200 # EVALUATION USING 200 BATCHES INSTEAD OF 1 RANDOM BATCH
 learning_rate = 3e-4
 device = "cuda" if torch.cuda.is_available() else "cpu"
-n_embd = 384
-n_head = 6
-n_layer = 6
+n_embd = 384 # EMBEDDING DIMENSION
+n_head = 6 # NUMBER OF ATTENTION HEADS
+n_layer = 6 # THE NUMBER OF TRANSFORMERS BLOCK 
 dropout = 0.2
 # ------------
 
@@ -115,7 +115,7 @@ class Head(nn.Module): # nn.Module: A pytorch COMPONENT THAT LETS US MANAGE AND 
 class MultiHeadAttention(nn.module):
     def __init__(self, num_heads, head_size):
         super().__init__()
-        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)]) # DOUBT: WHY NOT PLAIN PYTHON LIST? HOW DOES THIS DIFFER FROM NN.SEQUENTIAL ETC. NEED TO SPEND SOME TIME HERE. 
         self.proj = nn.Linear(head_size * num_heads, n_embd) # THE HEADS HAVE WORKED INDEPENDENTLY. THIS LEARNS HOW TO MIX INFORMATION FROM DIFFERENT HEADS.
         self.dropout = nn.Dropout(dropout)
     
@@ -126,34 +126,51 @@ class MultiHeadAttention(nn.module):
     
 # THINK ABOUT FEEDFORWARD LAYER THIS WAY: ATTENTION GATHERS INFORMATION, THIS LAYERS "THINKS" ABOUT THAT INFORMATION.
 class FeedForward(nn.module):
-    def __init__(self):
+    def __init__(self, n_embd):
         super().__init()
         self.net = nn.Sequential(
-            nn.Linear(),
-            nn.ReLU(),
-            nn.Linear(),
-            nn.Dropout(dropout)
+            nn.Linear(n_embd, 4*n_embd), # EXPAND TO EXPLORE RICHER FEATURE COMBINATIONS
+            nn.ReLU(), # A NON LINEARITY ALLOWING TO LEARN MORE COMPLEX PATTERNS THAN ONLY LINEAR LAYERS WOULD ALLOW
+            nn.Linear(4*n_embd, n_embd), # SHRINK BACK TO KEEP MODEL'S REPRESENTATION SIZE CONSISTENT
+            nn.Dropout(dropout) 
         )
-
+        
     def forward(self, x):
         return self.net(x)
 
 # TRANSFORMER BLOCK: COMBINES MULTI HEAD ATTENTION WITH FEED FORWARD PROCESSING 
 class Block(nn.Module):
-    def __init__():
+    def __init__(self, n_embd, n_head):
         super().__init__()
+        head_size = n_embd // n_head
+        self.sa = MultiHeadAttention(n_head, head_size) # COMMUNICATION FIRST
+        self.ffwd = FeedForward(n_embd) # THEN FOLLOWS COMPUTATION
+        self.ln1 = nn.LayerNorm(n_embd) # THIS IS APPLIED ON THE 384 FEATURES FOR EACH TOKEN TO KEEP FEATURE VALUES STABLE
+        self.ln2 = nn.LayerNorm(n_embd)
     
     def forward(self, x):
-        x = x + self.
+        x += self.sa(self.ln1(x))
+        x += self.ffwd(self.ln2(x))
+        return x
         
-
 # THE LANGUAGE MODEL
 class GPTLanguageModel(nn.module):
-    def __init__():
+    def __init__(self):
         super().__init__()
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+        self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        self.blocks = nn.Sequential()
+        self.apply(self.__init_weights)
         
-    def __init_weights():
+    def __init_weights(self):
+        
+                
+    def __init_weights(self, module):
+        if isinstance()
         
     def forward():
+        logits = 
+        loss = 
+        return logits, loss
         
     def generate():
