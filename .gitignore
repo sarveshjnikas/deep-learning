@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 logs/
 models/
+3_gpt/karpathy.py
+3_gpt/dev.ipynb
