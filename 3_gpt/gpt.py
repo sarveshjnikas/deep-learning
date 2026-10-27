@@ -1,14 +1,15 @@
 import torch
-import toch.nn as nn
+import torch.nn as nn
 from torch.nn import functional as F
 
 # HYPERPARAMETERS
 batch_size = 32
 block_size = 8
 max_iters = 5000
+eval_interval = 500 # HOW OFTEN TO PRINT TRAIN/VAL LOSS
 eval_iters = 200 # EVALUATION USING 200 BATCHES INSTEAD OF 1 RANDOM BATCH
 learning_rate = 3e-4
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
 n_embd = 384 # EMBEDDING DIMENSION
 n_head = 6 # NUMBER OF ATTENTION HEADS
 n_layer = 6 # THE NUMBER OF TRANSFORMERS BLOCK 
@@ -31,8 +32,8 @@ decode = lambda l: "".join([itos[i] for i in l])
 # TRAIN AND TEST SPLITS
 data = torch.tensor(encode(text), dtype=torch.long)
 n = int(0.9*len(data))
-train_data = data[n:]
-val_data = data[:n]
+train_data = data[:n] # FIRST 90% FOR TRAINING
+val_data = data[n:] # LAST 10% FOR VALIDATION
 
 # DATA LOADING
 def get_batch(split):
@@ -88,7 +89,7 @@ class Head(nn.Module): # nn.Module: A pytorch COMPONENT THAT LETS US MANAGE AND 
         self.key = nn.Linear(n_embd, head_size, bias=False) # head_size = n_embd // n_head WE WANT n_head DIFFERENT PERSPECTIVES WITHOUT INCREASING THE REPRESENTATION SIZE.
         self.query = nn.Linear(n_embd, head_size, bias=False) 
         self.value = nn.Linear(n_embd, head_size, bias=False)
-        self.register_buffer('tril', torch.tril(torch.ones((block_size, block_size)))) # REGISTER BUFFER MEANS STORE THIS IN THE MODEL BUT THIS IS NOT A LEARNABLE PARAMETER. THE MATRIX IS UPPER TRIANGULAR AND MEANS EACH TOKEN CAN ATTEND TO ITSELF AND TOKENS BEFORE IT BUT NEVER TO FUTURE TOKENS
+        self.register_buffer('tril', torch.tril(torch.ones((block_size, block_size)))) # REGISTER BUFFER MEANS STORE THIS IN THE MODEL BUT THIS IS NOT A LEARNABLE PARAMETER. THE MATRIX IS LOWER TRIANGULAR AND MEANS EACH TOKEN CAN ATTEND TO ITSELF AND TOKENS BEFORE IT BUT NEVER TO FUTURE TOKENS
         self.dropout = nn.Dropout(dropout)
         
     def forward(self, x):
@@ -112,7 +113,7 @@ class Head(nn.Module): # nn.Module: A pytorch COMPONENT THAT LETS US MANAGE AND 
         return out
 
 # MULTIPLE HEADS OF SELF-ATTENTION IN PARALLEL       
-class MultiHeadAttention(nn.module):
+class MultiHeadAttention(nn.Module):
     def __init__(self, num_heads, head_size):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)]) # DOUBT: WHY NOT PLAIN PYTHON LIST? HOW DOES THIS DIFFER FROM NN.SEQUENTIAL ETC. NEED TO SPEND SOME TIME HERE. 
@@ -125,9 +126,9 @@ class MultiHeadAttention(nn.module):
         return out # (B,T,n_embd)
     
 # THINK ABOUT FEEDFORWARD LAYER THIS WAY: ATTENTION GATHERS INFORMATION, THIS LAYERS "THINKS" ABOUT THAT INFORMATION.
-class FeedForward(nn.module):
+class FeedForward(nn.Module):
     def __init__(self, n_embd):
-        super().__init()
+        super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4*n_embd), # EXPAND TO EXPLORE RICHER FEATURE COMBINATIONS
             nn.ReLU(), # A NON LINEARITY ALLOWING TO LEARN MORE COMPLEX PATTERNS THAN ONLY LINEAR LAYERS WOULD ALLOW
@@ -149,28 +150,70 @@ class Block(nn.Module):
         self.ln2 = nn.LayerNorm(n_embd)
     
     def forward(self, x):
-        x += self.sa(self.ln1(x))
-        x += self.ffwd(self.ln2(x))
+        x = x + self.sa(self.ln1(x)) # NOT x += ...: IN-PLACE ADD WOULD OVERWRITE x THAT LAYERNORM SAVED FOR BACKPROP
+        x = x + self.ffwd(self.ln2(x)) # RESIDUAL: EACH SUBLAYER ADDS TO x INSTEAD OF REPLACING IT
         return x
         
 # THE LANGUAGE MODEL
-class GPTLanguageModel(nn.module):
+class GPTLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        self.position_embedding_table = nn.Embedding(block_size, n_embd)
-        self.blocks = nn.Sequential()
-        self.apply(self.__init_weights)
-        
-    def __init_weights(self):
-        
-                
-    def __init_weights(self, module):
-        if isinstance()
-        
-    def forward():
-        logits = 
-        loss = 
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embd) # WHAT EACH CHARACTER IS
+        self.position_embedding_table = nn.Embedding(block_size, n_embd) # WHERE IT SITS IN THE CONTEXT
+        self.blocks = nn.Sequential(*[Block(n_embd, n_head) for _ in range(n_layer)])
+        self.ln_f = nn.LayerNorm(n_embd) # FINAL LAYER NORM
+        self.lm_head = nn.Linear(n_embd, vocab_size) # MAPS EACH TOKEN'S FEATURES TO A SCORE FOR EVERY CHARACTER
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        # SMALL RANDOM WEIGHTS (STD 0.02) KEEP EARLY ACTIVATIONS AND GRADIENTS STABLE
+        if isinstance(module, nn.Linear):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def forward(self, idx, targets=None):
+        B, T = idx.shape
+        tok_emb = self.token_embedding_table(idx) # (B,T,C)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=idx.device)) # (T,C)
+        x = tok_emb + pos_emb # (B,T,C) BROADCAST ADDS THE SAME POSITION VECTORS TO EVERY SEQUENCE
+        x = self.blocks(x) # (B,T,C)
+        x = self.ln_f(x) # (B,T,C)
+        logits = self.lm_head(x) # (B,T,vocab_size)
+        if targets is None:
+            loss = None
+        else:
+            B, T, C = logits.shape
+            loss = F.cross_entropy(logits.view(B*T, C), targets.view(B*T)) # CROSS ENTROPY WANTS (N,C) AND (N,)
         return logits, loss
-        
-    def generate():
+
+    def generate(self, idx, max_new_tokens):
+        # idx: (B,T) CONTEXT. APPEND ONE SAMPLED CHARACTER AT A TIME
+        for _ in range(max_new_tokens):
+            idx_cond = idx[:, -block_size:] # POSITION TABLE ONLY HAS block_size ROWS, SO CROP THE CONTEXT
+            logits, _ = self(idx_cond)
+            logits = logits[:, -1, :] # ONLY THE LAST TIME STEP PREDICTS THE NEXT CHARACTER (B,vocab_size)
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1) # SAMPLE, NOT ARGMAX, SO TEXT IS NOT REPETITIVE (B,1)
+            idx = torch.cat((idx, idx_next), dim=1) # (B,T+1)
+        return idx
+
+model = GPTLanguageModel().to(device)
+print(sum(p.numel() for p in model.parameters())/1e6, "M parameters")
+optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+
+for it in range(max_iters):
+    if it % eval_interval == 0 or it == max_iters - 1:
+        losses = estimate_loss()
+        print(f"step {it}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+    xb, yb = get_batch("train")
+    logits, loss = model(xb, yb)
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()
+    optimizer.step()
+
+# GENERATE FROM A SINGLE "0" TOKEN (NEWLINE)
+context = torch.zeros((1, 1), dtype=torch.long, device=device)
+print(decode(model.generate(context, max_new_tokens=500)[0].tolist()))
