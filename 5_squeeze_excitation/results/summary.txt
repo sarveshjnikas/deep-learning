@@ -1,0 +1,25 @@
+LR SELECTION (baseline, seed 0, best-val checkpoint)
+  lr 0.0003: val acc 86.19% | val F1 0.8566
+  lr 0.001: val acc 87.14% | val F1 0.8694
+  lr 0.003: val acc 89.05% | val F1 0.8887
+  lr 0.01: val acc 89.05% | val F1 0.8888
+  lr 0.03: val acc 85.24% | val F1 0.8511
+  -> chosen lr 0.01
+
+MODEL | params | val acc | test acc | test macro-F1 (x100) | mean +- sample std over seeds
+baseline  | 394,293 | 88.25 +- 0.73 | 83.33 +- 1.49 | 83.41 +- 1.41 | n=3 | 4.2 min/run
+SE r=2    | 482,053 | 87.78 +- 1.45 | 85.95 +- 1.86 | 86.04 +- 1.96 | n=3 | 9.9 min/run
+SE r=4    | 438,413 | 88.41 +- 0.27 | 87.46 +- 0.50 | 87.60 +- 0.44 | n=3 | 9.7 min/run
+SE r=8    | 416,593 | 88.73 +- 0.99 | 85.56 +- 1.31 | 85.69 +- 1.36 | n=3 | 10.6 min/run
+
+PER-SEED TEST GAIN (SE r=4 - baseline): [2.86, 5.48, 4.05] -> mean 4.13 points
+
+Baseline: mean-curve min val loss 0.397 | mean per-seed best val loss 0.389 | final train loss 0.281
+SE (r=4): mean-curve min val loss 0.356 | mean per-seed best val loss 0.346 | final train loss 0.148
+SE WEIGHT CLASS-DEPENDENCE BY DEPTH, SEED-0 CHECKPOINT (mean over channels of the std across classes of class-mean weights)
+  SE block 1 (32 ch): class-std 0.0552 | mean weight 0.372 | ratio 0.148
+  SE block 2 (64 ch): class-std 0.0753 | mean weight 0.459 | ratio 0.164
+  SE block 3 (128 ch): class-std 0.0852 | mean weight 0.572 | ratio 0.149
+  SE block 4 (256 ch): class-std 0.2323 | mean weight 0.606 | ratio 0.384
+
+figures: loss_curves.png, se_weights.png
